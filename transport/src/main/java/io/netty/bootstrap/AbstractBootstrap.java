@@ -49,19 +49,20 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>When not used in a {@link ServerBootstrap} context, the {@link #bind()} methods are useful for connectionless
  * transports such as datagram (UDP).</p>
  */
+//几乎所有的底层操作，像registry bind connection等都是由unsafe这个类实际执行的
 public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C extends Channel> implements Cloneable {
     @SuppressWarnings("unchecked")
     static final Map.Entry<ChannelOption<?>, Object>[] EMPTY_OPTION_ARRAY = new Map.Entry[0];
     @SuppressWarnings("unchecked")
     static final Map.Entry<AttributeKey<?>, Object>[] EMPTY_ATTRIBUTE_ARRAY = new Map.Entry[0];
 
-    volatile EventLoopGroup group;
+    volatile EventLoopGroup group;//主处理线程。目前理解 处理accept事件， 本质上就是线程池
     @SuppressWarnings("deprecation")
-    private volatile ChannelFactory<? extends C> channelFactory;
-    private volatile SocketAddress localAddress;
-    private final Map<ChannelOption<?>, Object> options = new ConcurrentHashMap<ChannelOption<?>, Object>();
-    private final Map<AttributeKey<?>, Object> attrs = new ConcurrentHashMap<AttributeKey<?>, Object>();
-    private volatile ChannelHandler handler;
+    private volatile ChannelFactory<? extends C> channelFactory; // 通道工厂，为什么不直接将channel放进来，而选择将他的无参构造方法放进来？一个Bootstrap可能产生多个channel ？ //TODO
+    private volatile SocketAddress localAddress; //server 自身地址信息
+    private final Map<ChannelOption<?>, Object> options = new ConcurrentHashMap<ChannelOption<?>, Object>(); //可选参数
+    private final Map<AttributeKey<?>, Object> attrs = new ConcurrentHashMap<AttributeKey<?>, Object>(); //就相当于channel的attach，就是扩展属性
+    private volatile ChannelHandler handler; //处理器 与 childHandler有什么区别？//TODO
 
     AbstractBootstrap() {
         // Disallow extending from a different package.
@@ -261,15 +262,20 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
     }
 
     private ChannelFuture doBind(final SocketAddress localAddress) {
+        //应为是异步操作 所以先创一个future
+        //操作分为两步，一步注册 一步绑定
+        //实际的bind操作是有doBind0完成
         final ChannelFuture regFuture = initAndRegister();
         final Channel channel = regFuture.channel();
         if (regFuture.cause() != null) {
             return regFuture;
         }
 
+        //判断是否已经将channel注册到selector中
         if (regFuture.isDone()) {
             // At this point we know that the registration was complete and successful.
             ChannelPromise promise = channel.newPromise();
+            //进行绑定
             doBind0(regFuture, channel, localAddress, promise);
             return promise;
         } else {
@@ -299,7 +305,9 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
     final ChannelFuture initAndRegister() {
         Channel channel = null;
         try {
+            //通过Factory创建一个channel
             channel = channelFactory.newChannel();
+            //初始化设置属性
             init(channel);
         } catch (Throwable t) {
             if (channel != null) {
@@ -312,6 +320,9 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
             return new DefaultChannelPromise(new FailedChannel(), GlobalEventExecutor.INSTANCE).setFailure(t);
         }
 
+        //进行异步注册,使用的是主的EventLoopGroup,底层通过unsafe进行注册
+        //同时将channel与EventLoopGroup中的一个EventLoop（也就是线程）进行绑定
+        //也会执行在上述init()方法中 构建的ChannelInitializer的init方法
         ChannelFuture regFuture = config().group().register(channel);
         if (regFuture.cause() != null) {
             if (channel.isRegistered()) {
@@ -324,12 +335,13 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
         // If we are here and the promise is not failed, it's one of the following cases:
         // 1) If we attempted registration from the event loop, the registration has been completed at this point.
         //    i.e. It's safe to attempt bind() or connect() now because the channel has been registered.
+
         // 2) If we attempted registration from the other thread, the registration request has been successfully
         //    added to the event loop's task queue for later execution.
         //    i.e. It's safe to attempt bind() or connect() now:
         //         because bind() or connect() will be executed *after* the scheduled registration task is executed
         //         because register(), bind(), and connect() are all bound to the same thread.
-
+        // register bind connect 异步执行的任务 会在同一个任务队列中
         return regFuture;
     }
 
@@ -341,6 +353,7 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
 
         // This method is invoked before channelRegistered() is triggered.  Give user handlers a chance to set up
         // the pipeline in its channelRegistered() implementation.
+        //channelRegistered()方法将会先与下面的触发（因为这些时间都在同一个eventLoop中）
         channel.eventLoop().execute(new Runnable() {
             @Override
             public void run() {

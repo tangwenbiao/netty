@@ -377,6 +377,7 @@ public abstract class AbstractNioChannel extends AbstractChannel {
         boolean selected = false;
         for (;;) {
             try {
+                //设置0（没有感兴趣事件）的原因是应为，对于ServerSocket来说是Accept事件，但是对于Socket来说就没有Accept事件了，而是Connect事件
                 selectionKey = javaChannel().register(eventLoop().unwrappedSelector(), 0, this);
                 return;
             } catch (CancelledKeyException e) {

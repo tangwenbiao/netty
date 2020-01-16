@@ -49,7 +49,7 @@ public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerCh
     private final Map<AttributeKey<?>, Object> childAttrs = new ConcurrentHashMap<AttributeKey<?>, Object>();
     private final ServerBootstrapConfig config = new ServerBootstrapConfig(this);
     private volatile EventLoopGroup childGroup;
-    private volatile ChannelHandler childHandler;
+    private volatile ChannelHandler childHandler; //其实他本身是一层壳，也就是ChannelInitializer
 
     public ServerBootstrap() { }
 
@@ -142,6 +142,7 @@ public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerCh
                     pipeline.addLast(handler);
                 }
 
+                //这是一种延迟手段，具体情况暂不清晰
                 ch.eventLoop().execute(new Runnable() {
                     @Override
                     public void run() {
@@ -166,10 +167,11 @@ public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerCh
         return this;
     }
 
+    //进向 默认的最后一个执行
     private static class ServerBootstrapAcceptor extends ChannelInboundHandlerAdapter {
 
         private final EventLoopGroup childGroup;
-        private final ChannelHandler childHandler;
+        private final ChannelHandler childHandler; //最外层指定的处理器
         private final Entry<ChannelOption<?>, Object>[] childOptions;
         private final Entry<AttributeKey<?>, Object>[] childAttrs;
         private final Runnable enableAutoReadTask;

@@ -103,6 +103,7 @@ public abstract class ChannelInitializer<C extends Channel> extends ChannelInbou
      * {@inheritDoc} If override this method ensure you call super!
      */
     @Override
+    //唯一的方法就是通过ChannelInitializer进行add？
     public void handlerAdded(ChannelHandlerContext ctx) throws Exception {
         if (ctx.channel().isRegistered()) {
             // This should always be true with our current DefaultChannelPipeline implementation.
